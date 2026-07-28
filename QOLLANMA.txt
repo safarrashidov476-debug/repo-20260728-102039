@@ -1,0 +1,48 @@
+TELEGRAM (DrKLO/Telegram) - AVTOMATIK BUILD QO'LLANMASI
+=========================================================
+
+BU ZIP ENDI BARCHA 4 TA O'ZGARISHNI TO'LIQ AVTOMATIK BAJARADI:
+1. Nomlanish tartibi (ism, keyin "bot"/"kanal"/"guruh")
+2. Ulashish tugmasini TalkBack'dan yashirish
+3. Fayl yuklash foizini e'lon qilish + yuklab olish tugaganda tovush
+4. Kanal postlarida "Muhokamani ko'rish" menyu bandi
+
+SIZDAN FAQAT IKKITA NARSA TALAB QILINADI:
+
+1) api_id va api_hash (ALBATTA KERAK)
+   - https://my.telegram.org saytiga kiring (o'z Telegram raqamingiz bilan)
+   - "API development tools" bo'limidan yangi ilova yarating
+   - api_config.txt faylini oching va shu formatda to'ldiring:
+
+     API_ID=123456
+     API_HASH=abcdef0123456789abcdef0123456789
+
+2) google-services.json (IXTIYORIY - faqat push-bildirishnomalar uchun)
+   - Bo'lmasa ham ilova ishlayveradi, faqat push-xabarnoma cheklangan bo'ladi
+   - Kerak bo'lsa: Firebase konsolida (console.firebase.google.com) loyiha
+     yaratib, google-services.json faylini yuklab, repo ildiziga qo'ying
+
+REPO ILDIZIGA YUKLANADIGAN FAYLLAR (BARCHASI BU ZIP ICHIDA):
+- api_config.txt (to'ldirib qo'ying)
+- patch_dialogcell.py
+- patch_sharebutton.py
+- patch_progress.py
+- patch_viewdiscussion.py
+- .github/ papkasi (workflow bilan)
+- google-services.json (ixtiyoriy, alohida qo'shasiz)
+
+BUILD VARIANTI HAQIDA ESLATMA:
+Workflow "assembleAfatRelease" buyrug'ini ishlatadi. Agar bu xato
+bersa, Actions logida "assemble" so'zi bilan boshlanadigan variant
+nomlarini toping va workflow faylidagi shu qatorni moslashtiring:
+    run: ./gradlew assembleAfatRelease --stacktrace
+
+IMZOLASH:
+Birinchi build'da workflow o'zi imzolash kaliti (keystore) yaratib,
+repo'ga saqlaydi - keyingi barcha buildlar shu bilan imzolanadi,
+shuning uchun yangilanishlar to'g'ridan-to'g'ri o'rnatiladi
+(eski ilovani o'chirish shart emas).
+
+Settings -> Actions -> General -> "Workflow permissions" -> 
+"Read and write permissions" yoqilgan bo'lishi shart (kalitni
+va Release'ni saqlash uchun).

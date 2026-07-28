@@ -1,0 +1,168 @@
+name: Telegram APK qurish (avtomatik)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Sizning repo fayllaringizni olish
+        uses: actions/checkout@v4
+        with:
+          path: my-files
+
+      - name: Telegram manba kodini yuklab olish
+        run: git clone --recursive https://github.com/DrKLO/Telegram.git telegram-src
+
+      - name: JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: NDK o'rnatish
+        run: sdkmanager --install "ndk;25.2.9519653"
+
+      - name: Build-tools o'rnatish (imzolash uchun)
+        run: sdkmanager --install "build-tools;34.0.0"
+
+      # ============================================================
+      # MUHIM: api_id / api_hash ni qo'shish
+      # my-files/api_config.txt faylida ikkita qator bo'lishi kerak:
+      #   API_ID=123456
+      #   API_HASH=abcdef0123456789abcdef0123456789
+      # my.telegram.org saytidan olingan bo'lishi kerak
+      # ============================================================
+      - name: api_id / api_hash ni joylashtirish
+        run: |
+          if [ -f my-files/api_config.txt ]; then
+            API_ID=$(grep API_ID my-files/api_config.txt | cut -d'=' -f2)
+            API_HASH=$(grep API_HASH my-files/api_config.txt | cut -d'=' -f2)
+            BUILDVARS="telegram-src/TMessagesProj/src/main/java/org/telegram/messenger/BuildVars.java"
+            sed -i "s/public static int APP_ID = [0-9]*;/public static int APP_ID = ${API_ID};/" "$BUILDVARS"
+            sed -i "s/public static String APP_HASH = \"[^\"]*\";/public static String APP_HASH = \"${API_HASH}\";/" "$BUILDVARS"
+            echo "api_id/api_hash muvaffaqiyatli qo'shildi"
+          else
+            echo "OGOHLANTIRISH: my-files/api_config.txt topilmadi - api_id/api_hash o'rnatilmadi, build ishlamasligi mumkin!"
+          fi
+
+      # ============================================================
+      # MUHIM: google-services.json (Firebase) - agar mavjud bo'lsa
+      # ============================================================
+      - name: google-services.json joylashtirish (agar mavjud bo'lsa)
+        run: |
+          if [ -f my-files/google-services.json ]; then
+            cp my-files/google-services.json telegram-src/TMessagesProj/google-services.json
+            echo "google-services.json joylashtirildi"
+          else
+            echo "OGOHLANTIRISH: google-services.json topilmadi - push xabarnomalari ishlamasligi mumkin"
+          fi
+
+      - name: DialogCell.java - nomlanish tartibini tuzatish
+        run: |
+          FILE="telegram-src/TMessagesProj/src/main/java/org/telegram/ui/Cells/DialogCell.java"
+          python3 my-files/patch_dialogcell.py "$FILE"
+
+      - name: ChatMessageCell.java - ulashish tugmasini yashirish
+        run: |
+          FILE="telegram-src/TMessagesProj/src/main/java/org/telegram/ui/Cells/ChatMessageCell.java"
+          python3 my-files/patch_sharebutton.py "$FILE"
+
+      - name: ChatMessageCell.java - yuklash progressini e'lon qilish + tovush
+        run: |
+          FILE="telegram-src/TMessagesProj/src/main/java/org/telegram/ui/Cells/ChatMessageCell.java"
+          python3 my-files/patch_progress.py "$FILE"
+
+      - name: ChatActivity.java - Muhokamani ko'rish menyu bandi
+        run: |
+          FILE="telegram-src/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java"
+          python3 my-files/patch_viewdiscussion.py "$FILE"
+
+      - name: Imzolash kaliti (keystore) tayyorlash
+        run: |
+          if [ ! -f my-files/release.keystore ]; then
+            echo "Kalit topilmadi - yangi kalit yaratilmoqda (faqat bir marta)..."
+            keytool -genkeypair -v \
+              -keystore my-files/release.keystore \
+              -alias telegramuz \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass telegram123 -keypass telegram123 \
+              -dname "CN=Telegram UZ, OU=Personal, O=Personal, L=Tashkent, S=Tashkent, C=UZ"
+            cd my-files
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add release.keystore
+            git commit -m "Avtomatik: imzolash kaliti yaratildi"
+            git push
+          else
+            echo "Kalit allaqachon mavjud - shu kalit ishlatiladi."
+          fi
+
+      - name: gradlew huquqi
+        run: chmod +x ./gradlew
+        working-directory: telegram-src
+
+      # ============================================================
+      # E'TIBOR BERING: "assembleAfatRelease" - Telegram'ning bitta
+      # build variantining nomi. Agar xato chiqsa, quyidagi buyruq
+      # bilan mavjud variantlar ro'yxatini ko'ring:
+      #   ./gradlew tasks --all | grep assemble
+      # va shu yerdagi nomni moslang.
+      # ============================================================
+      - name: APK yig'ish
+        run: ./gradlew assembleAfatRelease --stacktrace
+        working-directory: telegram-src
+
+      - name: APK'ni topish
+        id: find_apk
+        run: |
+          APK_FILE=$(find TMessagesProj/build/outputs/apk -name "*.apk" | grep -i release | head -n 1)
+          echo "Topilgan APK: $APK_FILE"
+          echo "apk_path=telegram-src/$APK_FILE" >> $GITHUB_OUTPUT
+        working-directory: telegram-src
+
+      - name: APK'ni tekislash va imzolash
+        id: sign_apk
+        run: |
+          BUILD_TOOLS_DIR=$(find $ANDROID_HOME/build-tools -maxdepth 1 -type d -name "34*" | sort -V | tail -n 1)
+          ZIPALIGN="$BUILD_TOOLS_DIR/zipalign"
+          APKSIGNER="$BUILD_TOOLS_DIR/apksigner"
+
+          UNSIGNED_APK="${{ steps.find_apk.outputs.apk_path }}"
+          ALIGNED_APK="aligned-unsigned.apk"
+          SIGNED_APK="telegram-uz-signed.apk"
+
+          "$ZIPALIGN" -v -p 4 "$UNSIGNED_APK" "$ALIGNED_APK"
+          "$APKSIGNER" sign \
+            --ks my-files/release.keystore \
+            --ks-pass pass:telegram123 \
+            --key-pass pass:telegram123 \
+            --out "$SIGNED_APK" \
+            "$ALIGNED_APK"
+
+          echo "signed_apk_path=$SIGNED_APK" >> $GITHUB_OUTPUT
+
+      - name: Imzolangan APK'ni Artifacts'ga yuklash
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegram-apk-signed
+          path: ${{ steps.sign_apk.outputs.signed_apk_path }}
+
+      - name: Tayyor Release yaratish
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: "Tayyor imzolangan APK - build #${{ github.run_number }}"
+          files: ${{ steps.sign_apk.outputs.signed_apk_path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
